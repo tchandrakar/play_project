@@ -1,6 +1,6 @@
 package services.models
 
-import slick.lifted.{ForeignKeyQuery, ProvenShape, Tag}
+import slick.lifted.{ProvenShape, Tag}
 import slick.jdbc.PostgresProfile.api._
 
 case class BookAuthor(id: Long, authorId: Long, bookId: Long)

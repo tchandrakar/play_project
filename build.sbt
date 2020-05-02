@@ -21,7 +21,8 @@ libraryDependencies ++= Seq(
   "com.typesafe.play" %% "play-json" % playVersion withSources(),
 
   "org.sangria-graphql" %% "sangria" % "1.4.2" withSources(),
-  "org.sangria-graphql" %% "sangria-play-json" % "1.0.5" withSources()
+  "org.sangria-graphql" %% "sangria-play-json" % "1.0.5" withSources(),
+  "com.github.3tty0n" %% "jwt-scala" % "1.3.0"
 
 
   //"joda-time" % "joda-time" % "2.8.1",

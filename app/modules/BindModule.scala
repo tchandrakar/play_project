@@ -1,7 +1,8 @@
 package modules
 
-import Utilities.db.DbUtils
 import com.google.inject.AbstractModule
+import utilities.DbUtils
+
 
 class BindModule extends AbstractModule {
 
