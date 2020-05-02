@@ -18,6 +18,9 @@ class TransactionDetails(tag: Tag) extends Table[TransactionDetail](tag, "transa
   def billAmount = column[Long]("bill_amount")
   def transactionDate = column[String]("transaction_date")
 
+  def fkeybillerBillId= foreignKey(s"fkey_${tableName}_biller_bill_id_to_customer_bill_statuses",
+    billerBillId, CustomerToBills.query )(_.billerBillID)
+
   override def * = (id, billerBillId, platformBillId, platformTransactionRefID,
     uniquePaymentRefID, amountPaid, billAmount, transactionDate) <> (TransactionDetail.tupled, TransactionDetail.unapply)
 }

@@ -1,7 +1,7 @@
 package utilities
 
 import play.api.Logger
-import services.models.{BillStatuses, CustomerBillStatuses, CustomerToBills, Customers}
+import services.models.{BillStatuses, CustomerBillStatuses, CustomerToBills, Customers, TransactionDetails}
 import slick.dbio.DBIO
 import slick.jdbc.JdbcBackend.Database
 import slick.jdbc.PostgresProfile.api._
@@ -23,7 +23,8 @@ object DbUtils {
     "customers" -> Customers.query,
     "customer_bill_statuses" -> CustomerBillStatuses.query,
     "customer_to_bills" -> CustomerToBills.query,
-    "bill_status" -> BillStatuses.query
+    "bill_status" -> BillStatuses.query,
+    "transaction_details" -> TransactionDetails.query
   )
 
   def checkAndCreateTables(): Unit = {

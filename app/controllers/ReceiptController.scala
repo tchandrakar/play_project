@@ -21,13 +21,11 @@ class ReceiptController @Inject()(cc: ControllerComponents,
       Try {
         customerService.fetchBills(fetchBillRequest.customerIdentifiers).safely
       }.flattenedEither.map {
-        case Left(t: InvalidReceiptFetchRequest) => failedResponse(NOT_FOUND, "customer-invalid", "Customer invalid", t.fieldValue)
+        case Left(t: InvalidReceiptFetchRequest) => NotFound(failedResponse(NOT_FOUND, "customer-invalid", "Customer invalid", t.fieldValue))
         case Left(t: Throwable) => throw t
         case Right(result) => Ok(Json.toJson(result))
       }
-      Future.successful(Ok("Fetch the bill status here"))
     })
-    // TODO handle this badrequest
   }
 
 
@@ -37,16 +35,14 @@ class ReceiptController @Inject()(cc: ControllerComponents,
         customerService.fetchReceipt(fetchReceiptRequest).safely
       }.flattenedEither.map {
         case Left(t: InvalidReceiptFetchRequest) =>
-          failedResponse(NOT_FOUND, "customer-invalid", "Customer invalid", t.fieldValue)
+          NotFound(failedResponse(NOT_FOUND, "customer-invalid", "Customer invalid", t.fieldValue))
         case Left(t: Throwable) => throw t
         case Right(result) =>
           Ok(Json.obj("billerBillID" -> result.billerBillId, "platformBillID" -> s"SETU${result.platformBillId}",
           "platformTransactionRefID" -> s"TXN${result.platformTransactionRefID}",
             "receipt" -> Json.obj("id" -> s"R${result.id}", "date" -> result.transactionDate)))
       }
-      Future.successful(Ok("Fetch the bill status here"))
     })
-    // TODO handle this badrequest
   }
 
 }
