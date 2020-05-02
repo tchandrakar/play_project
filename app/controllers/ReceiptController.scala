@@ -9,7 +9,6 @@ import services.RequestDTOs.{FetchBillRequestDTO, FetchReceiptRequestDTO}
 import services.impl.CustomerServiceImpl.InvalidReceiptFetchRequest
 import utilities.DbUtils._
 
-import scala.concurrent.Future
 import scala.util.Try
 
 @Singleton
@@ -23,7 +22,7 @@ class ReceiptController @Inject()(cc: ControllerComponents,
       }.flattenedEither.map {
         case Left(t: InvalidReceiptFetchRequest) => NotFound(failedResponse(NOT_FOUND, "customer-invalid", "Customer invalid", t.fieldValue))
         case Left(t: Throwable) => throw t
-        case Right(result) => Ok(Json.toJson(result))
+        case Right(result) => Ok(Json.obj("status" -> OK, "success" -> true, "data" -> Json.toJson(result)))
       }
     })
   }

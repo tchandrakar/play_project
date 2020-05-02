@@ -5,11 +5,10 @@ import services.RequestDTOs.{AttributeRequestDTO, CustomerOnBoarding, FetchRecei
 import services.ResponseDTOs.SuccessResponse
 import services.impl.CustomerServiceImpl
 import services.models.TransactionDetail
-import slick.dbio.DBIO
 
 import scala.concurrent.Future
 
-@ImplementedBy[CustomerServiceImpl]
+@ImplementedBy(classOf[CustomerServiceImpl])
 trait CustomerService {
   def addCustomer(customer: CustomerOnBoarding): Future[Long]
 

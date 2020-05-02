@@ -4,13 +4,15 @@ import java.util.concurrent.ThreadLocalRandom
 
 import com.google.inject.Singleton
 import org.joda.time.DateTime
-import services.{CustomerService, RequestDTOs}
-import services.Ids.{Amount, DateTimeFormatterObject, PlatformBillId, PlatformTransactionRefID, ReceiptId, UniquePaymentRefID}
+import services.CustomerService
+import services.Ids._
 import services.RequestDTOs.{AttributeRequestDTO, CustomerOnBoarding, FetchReceiptRequestDTO}
 import services.ResponseDTOs._
 import services.impl.CustomerServiceImpl.{DataNotFound, InvalidReceiptFetchRequest, OnlyOneTimePaymentAllowedException}
 import services.models._
+import slick.dbio.Effect
 import slick.jdbc.PostgresProfile.api._
+import slick.sql.FixedSqlAction
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
@@ -70,50 +72,68 @@ class CustomerServiceImpl extends CustomerService {
     db.run(addCustomerBillInBulkDBIO(bills, customerId))
   }
 
-  override def updatePaymentStatus(billerBillId: Long, amountPaid: Long, transactionDetail: TransactionDetail): Future[SuccessResponse] = db.run {
-    for {
-      customerToBill <- customerToBillsQuery.filter(_.billerBillID === billerBillId).result.headOption
-        .map(_.getOrElse(throw DataNotFound(billerBillId)))
+  override def updatePaymentStatus(billerBillId: Long, amountPaid: Long, transactionDetail: TransactionDetail): Future[SuccessResponse] = {
+    def updateCustomerToBill(customerToBill: CustomerToBill, newAmount: Long): DBIO[Unit] = {
+      customerToBillsQuery.filter(_.billerBillID === customerToBill.billerBillID).map(_.amount).update(newAmount).map(_ => ())
+    }
 
-      customer <- customerQuery.filter(_.customerId === customerToBill.customerId)
-        .result.headOption.map(_.getOrElse(throw DataNotFound(customerToBill.customerId)))
+    def find: DBIO[(CustomerToBill, Customer)] = (for {
+      c <- customerQuery
+      cb <- customerToBillsQuery if (c.customerId === cb.customerId && cb.billerBillID === billerBillId)
+    } yield (cb, c)).result.headOption.map(_.getOrElse(throw DataNotFound(billerBillId)))
 
-      (recurrence, amountExactness, newAmount) <- {
-        val recurrence = Recurrence.fromString(customerToBill.recurrence)
-        val amountExactness = AmountExactness.fromString(customerToBill.amountExactness)
-        if (recurrence == OneTime && (amountPaid - customerToBill.amount<0)) {
-          throw OnlyOneTimePaymentAllowedException(billerBillId)
-        } else {
-          val newAmount = Math.max(amountPaid - customerToBill.amount, 0)
-          customerToBillsQuery.filter(_.billerBillID === customerToBill.billerBillID).map(_.amount)
-            .update(newAmount).map(_ => (recurrence, amountExactness, newAmount))
-        }
-      }
-      customerToBills <- customerToBillsQuery.filter(_.customerId === customer.id).result.map(_.filter(_.amount>0))
-      _ <- if (customerToBills.isEmpty){
+    def update: DBIO[SuccessResponse] = for {
+      (customerToBill, customer) <- find
+
+      (recurrence, amountExactness, newAmount) = (Recurrence.fromString(customerToBill.recurrence),
+        AmountExactness.fromString(customerToBill.amountExactness), Math.max(amountPaid - customerToBill.amount, 0))
+
+      _ <-  customerToBillsQuery.filter(_.billerBillID === customerToBill.billerBillID).map(_.amount).update(newAmount).map(_ => ())
+
+      customerToBills <- customerToBillsQuery.filter(_.customerId === customer.id).result.map(_.filter(_.amount > 0))
+
+      _ <- if (customerToBills.isEmpty) {
         customerQuery.filter(_.customerId === customer.id).map(_.billFetchStatus).update(NoOutstanding.status)
       } else DBIO.successful(())
+
       _ <- updateBillStatus(billerBillId, newAmount)
       _ <- transactionDetailsQuery += transactionDetail
+
     } yield {
-      val (billFetchStatus, displayName) = if(newAmount==0) (NoOutstanding, "No outstanding") else (Available, "Total outstanding")
-      SuccessResponse(CustomerData(CustomerName(customer.name), BillDetails(billFetchStatus, List(SingleBillDetail(billerBillId, customerToBill.generatedOn, recurrence, amountExactness, CustomerId(customerToBill.customerId),
-        Aggregates(AggregateTotal(displayName, Amount(newAmount))))))))
+      val (billFetchStatus, displayName) =
+        if (newAmount == 0) (NoOutstanding, "No outstanding")
+        else (Available, "Total outstanding")
+      SuccessResponse(
+        CustomerData(CustomerName(customer.name),
+          BillDetails(billFetchStatus,
+            List(
+              SingleBillDetail(billerBillId, customerToBill.generatedOn, recurrence, amountExactness,
+                CustomerId(customerToBill.customerId),
+                Aggregates(AggregateTotal(displayName, Amount(newAmount)))
+              )
+            )
+          )
+      ))
+
     }
+
+    db.run(update)
   }
 
   override def fetchBills(customerIdentifiers: List[AttributeRequestDTO]): Future[SuccessResponse] = db.run {
     def isAllDigits(x: String) = x forall Character.isDigit
+
     val mNo = customerIdentifiers.filter(_.attributeName == mKey)
     val names = customerIdentifiers.filter(_.attributeName == nameKey)
     val customerIds = customerIdentifiers.filter(_.attributeName == customerIdKey)
     val emailIds = customerIdentifiers.filter(_.attributeName == emailIdKey)
-    if(mNo.length>1 || names.length>1 || customerIds.length>1 || emailIds.length>1) throw InvalidReceiptFetchRequest(customerIdentifiers.toString)
+    if (mNo.length > 1 || names.length > 1 || customerIds.length > 1 || emailIds.length > 1) throw InvalidReceiptFetchRequest(customerIdentifiers.toString)
     val (mobile, name, customerId, emailId) = (mNo.headOption, names.headOption, customerIds.headOption, emailIds.headOption)
-    for {
-      customersWithMobileFilter <- mobile match {
-        case Some(value) if isAllDigits(value.attributeValue) => customerQuery.filter(_.mobileNumber === value.attributeValue.toLong).result
-        case None => customerQuery.result
+    (for {
+      customersFromDB <- customerQuery.result.map(_.map(r => r))
+      customersWithMobileFilter = mobile match {
+        case Some(value) if isAllDigits(value.attributeValue) => customersFromDB.filter(_.mobileNumber == value.attributeValue.toLong)
+        case None => customersFromDB
         case _ => throw InvalidReceiptFetchRequest(mKey)
       }
       customersWithNameFilter = name match {
@@ -129,9 +149,9 @@ class CustomerServiceImpl extends CustomerService {
         case Some(value) => customersWithCustomerIdFilter.filter(_.name == value.attributeValue)
         case None => customersWithCustomerIdFilter
       }
-      customer = if(customers.length>1){
+      customer = if (customers.length > 1) {
         throw InvalidReceiptFetchRequest(s"Multiple customer found with the filters.")
-      } else if(customers.isEmpty){
+      } else if (customers.isEmpty) {
         throw InvalidReceiptFetchRequest(s"Invalid request.")
       } else {
         customers.head
@@ -144,7 +164,7 @@ class CustomerServiceImpl extends CustomerService {
           AmountExactness.fromString(bill.amountExactness), CustomerId(customer.id), Aggregates(AggregateTotal(displayName, Amount(bill.amount))))
       }
       SuccessResponse(CustomerData(CustomerName(customer.name), BillDetails(BillFetchStatus.fromString(customer.billFetchStatus), allBillDetails)))
-    }
+    }).transactionally
   }
 
   protected[services] def addCustomerBillInBulkDBIO(bills: Seq[Long], customerId: Long): DBIO[Seq[Long]] = {
@@ -200,7 +220,11 @@ class CustomerServiceImpl extends CustomerService {
 }
 
 object CustomerServiceImpl {
+
   case class DataNotFound(id: Long) extends Exception(s"$id is an invalid id.")
+
   case class OnlyOneTimePaymentAllowedException(id: Long) extends Exception(s"$id has to be paid full in one go.")
+
   case class InvalidReceiptFetchRequest(fieldValue: String) extends Exception(s"$fieldValue can only be one value.")
+
 }

@@ -17,7 +17,7 @@ class CustomerController @Inject()(cc: ControllerComponents,
       Try {
         customerService.addCustomer(customerOnBoarding).safely
       }.flattenedEither.map {
-        case Left(t: DataNotFound) => throw t
+        case Left(t: Throwable) => throw t
         case Right(customerId) => Ok(Json.obj("customerId" -> customerId))
       }
     })
@@ -28,7 +28,8 @@ class CustomerController @Inject()(cc: ControllerComponents,
       Try {
         customerService.addCustomerBillInBulk(bulkTransaction.bills, bulkTransaction.customerId).safely
       }.flattenedEither.map {
-        case Left(t: DataNotFound) => throw t
+        //case Left(t: DataNotFound) => throw t
+        case Left(t: Throwable) => throw t
         case Right(billIds) => Ok(Json.obj("billIds" -> billIds))
       }
     })

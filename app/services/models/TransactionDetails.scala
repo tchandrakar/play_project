@@ -1,7 +1,7 @@
 package services.models
 
 import slick.jdbc.PostgresProfile.api._
-import slick.lifted.{ForeignKeyQuery, ProvenShape, Tag}
+import slick.lifted.Tag
 
 case class TransactionDetail(id: Long, billerBillId: Long, platformBillId: Long, platformTransactionRefID: Long,
                              uniquePaymentRefID: String, amountPaid: Long, billAmount: Long, transactionDate: String)
