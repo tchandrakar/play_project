@@ -4,9 +4,9 @@ import java.util.concurrent.ThreadLocalRandom
 
 import com.google.inject.Singleton
 import org.joda.time.DateTime
-import services.CustomerService
-import services.Ids.{Amount, DateTimeFormatterObject}
-import services.RequestDTOs.{AttributeRequestDTO, CustomerOnBoarding}
+import services.{CustomerService, RequestDTOs}
+import services.Ids.{Amount, DateTimeFormatterObject, PlatformBillId, PlatformTransactionRefID, ReceiptId, UniquePaymentRefID}
+import services.RequestDTOs.{AttributeRequestDTO, CustomerOnBoarding, FetchReceiptRequestDTO}
 import services.ResponseDTOs._
 import services.impl.CustomerServiceImpl.{DataNotFound, InvalidReceiptFetchRequest, OnlyOneTimePaymentAllowedException}
 import services.models._
@@ -23,6 +23,7 @@ class CustomerServiceImpl extends CustomerService {
   lazy val customerBillStatusQuery = CustomerBillStatuses.query
   lazy val customerToBillsQuery = CustomerToBills.query
   lazy val billStatusesQuery = BillStatuses.query
+  lazy val transactionDetailsQuery = TransactionDetails.query
   lazy val (mKey, nameKey, customerIdKey, emailIdKey) = ("mobileNumber", "name", "customerId", "emailId")
 
   def now: String = DateTime.now().toString(DateTimeFormatterObject.dateFormat)
@@ -55,26 +56,21 @@ class CustomerServiceImpl extends CustomerService {
     }
   }
 
-  override def addCustomer(customerOnBoarding: CustomerOnBoarding): Future[(Long, Seq[Long])] = db.run {
+  override def addCustomer(customerOnBoarding: CustomerOnBoarding): Future[Long] = db.run {
     (for {
       id <- customerQuery.map(_.customerId).result.map(_.getRandomCustomerId)
-      billIds <- customerOnBoarding.billAmount match {
-        case Some(bills) => addCustomerBillInBulkDBIO(bills, id)
-        case None => DBIO.successful(Seq.empty[Long])
-      }
-      updateReason = if (billIds.isEmpty) NoOutstanding else Available
-      _ <- updateCustomerBillStatus(id, updateReason)
+      _ <- updateCustomerBillStatus(id, NoOutstanding)
       _ <- customerQuery += Customer(id, customerOnBoarding.mobileNumber,
-        customerOnBoarding.name, updateReason.status, customerOnBoarding.emailId)
+        customerOnBoarding.name, NoOutstanding.status, customerOnBoarding.emailId)
 
-    } yield (id, billIds)).transactionally
+    } yield id).transactionally
   }
 
   override def addCustomerBillInBulk(bills: Seq[Long], customerId: Long): Future[Seq[Long]] = {
     db.run(addCustomerBillInBulkDBIO(bills, customerId))
   }
 
-  override def updatePaymentStatus(billerBillId: Long, amountPaid: Long): Future[SuccessResponse] = db.run {
+  override def updatePaymentStatus(billerBillId: Long, amountPaid: Long, transactionDetail: TransactionDetail): Future[SuccessResponse] = db.run {
     for {
       customerToBill <- customerToBillsQuery.filter(_.billerBillID === billerBillId).result.headOption
         .map(_.getOrElse(throw DataNotFound(billerBillId)))
@@ -98,6 +94,7 @@ class CustomerServiceImpl extends CustomerService {
         customerQuery.filter(_.customerId === customer.id).map(_.billFetchStatus).update(NoOutstanding.status)
       } else DBIO.successful(())
       _ <- updateBillStatus(billerBillId, newAmount)
+      _ <- transactionDetailsQuery += transactionDetail
     } yield {
       val (billFetchStatus, displayName) = if(newAmount==0) (NoOutstanding, "No outstanding") else (Available, "Total outstanding")
       SuccessResponse(CustomerData(CustomerName(customer.name), BillDetails(billFetchStatus, List(SingleBillDetail(billerBillId, customerToBill.generatedOn, recurrence, amountExactness, CustomerId(customerToBill.customerId),
@@ -105,7 +102,7 @@ class CustomerServiceImpl extends CustomerService {
     }
   }
 
-  override def fetchReceipts(customerIdentifiers: List[AttributeRequestDTO]): Future[SuccessResponse] = db.run {
+  override def fetchBills(customerIdentifiers: List[AttributeRequestDTO]): Future[SuccessResponse] = db.run {
     def isAllDigits(x: String) = x forall Character.isDigit
     val mNo = customerIdentifiers.filter(_.attributeName == mKey)
     val names = customerIdentifiers.filter(_.attributeName == nameKey)
@@ -156,9 +153,14 @@ class CustomerServiceImpl extends CustomerService {
       ids <- DBIO.sequence(bills.map { billAmount =>
         if (billAmount != 0) {
           val id = allIds.getRandomBillId
+          val platformBillId = PlatformBillId(PlatformBillId("").generateRandomId).fromString
+          val platformTransactionrefId = PlatformTransactionRefID(PlatformTransactionRefID("").generateRandomId).fromString
+          val rId = ReceiptId(ReceiptId("").generateRandomId).fromString
           for {
             _ <- customerToBillsQuery += CustomerToBill(id, customerId, now, Random.shuffle(Recurrence.all).head.rType,
               Random.shuffle(AmountExactness.all).head.exactness, billAmount)
+            _ <- transactionDetailsQuery += TransactionDetail(rId, id, platformBillId, platformTransactionrefId
+              , UniquePaymentRefID("").generateRandomUniquePaymentRefId, 0, billAmount, now)
             _ <- updateBillStatus(id, billAmount)
           } yield Some(id)
         }
@@ -184,6 +186,16 @@ class CustomerServiceImpl extends CustomerService {
       lastBillStatus <- billStatusesQuery.filter(r => r.billerBillID === billerBillId && r.superSeededBy.isEmpty).result.headOption
       _ <- billStatusesQuery += BillStatus(-1, customerToBill.billerBillID, billAmount, now, lastBillStatus.map(_.id))
     } yield ()).transactionally
+  }
+
+  override def fetchReceipt(fetchReceiptRequestDTO: FetchReceiptRequestDTO): Future[TransactionDetail] = {
+    val rId = ReceiptId(ReceiptId("").generateRandomId).fromString
+    val date = now
+    val transactionDetail = TransactionDetail(rId, fetchReceiptRequestDTO.billerBillID, fetchReceiptRequestDTO.platformBillID.fromString,
+      fetchReceiptRequestDTO.paymentDetails.platformTransactionRefID.fromString, fetchReceiptRequestDTO.paymentDetails.uniquePaymentRefID.id,
+      fetchReceiptRequestDTO.paymentDetails.amountPaid.value, fetchReceiptRequestDTO.paymentDetails.billAmount.value, date)
+    updatePaymentStatus(fetchReceiptRequestDTO.billerBillID, fetchReceiptRequestDTO.paymentDetails.amountPaid.value, transactionDetail)
+      .map(_ => transactionDetail)
   }
 }
 

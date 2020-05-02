@@ -2,6 +2,7 @@ package services.models
 
 import slick.jdbc.PostgresProfile.api._
 import slick.lifted.{ForeignKeyQuery, ProvenShape, Tag}
+
 case class BillStatus(id: Long, billerBillId: Long, amount: Long, updatedOn: String, superSeededBy: Option[Long])
 
 class BillStatuses(tag: Tag) extends Table[BillStatus](tag, "bill_status") {

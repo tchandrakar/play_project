@@ -25,15 +25,21 @@ object RequestDTOs {
     implicit val formats: Format[PaymentDetails] = Json.format[PaymentDetails]
   }
 
-  case class FetchReceiptRequestDTO(billerBillID: Long, platformBillID: PlatformBillId)
+  case class FetchReceiptRequestDTO(billerBillID: Long, platformBillID: PlatformBillId, paymentDetails: PaymentDetails)
 
   object FetchReceiptRequestDTO {
     implicit val formats: OFormat[FetchReceiptRequestDTO] = Json.format[FetchReceiptRequestDTO]
   }
 
-  case class CustomerOnBoarding(name: String, mobileNumber: Long, emailId: String, billAmount: Option[Seq[Long]])
+  case class CustomerOnBoarding(name: String, mobileNumber: Long, emailId: String)
 
   object CustomerOnBoarding {
     implicit val formats: OFormat[CustomerOnBoarding] = Json.format[CustomerOnBoarding]
+  }
+
+  case class AddTransactionInBulk(customerId: Long, bills: Seq[Long])
+
+  object AddTransactionInBulk {
+    implicit val formats: OFormat[AddTransactionInBulk] = Json.format[AddTransactionInBulk]
   }
 }
